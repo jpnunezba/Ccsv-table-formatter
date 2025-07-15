@@ -437,11 +437,12 @@ function App() {
                   className="hidden"
                   id="file-upload"
                 />
-                <label htmlFor="file-upload">
-                  <Button className="brand-primary cursor-pointer">
-                    Choose File
-                  </Button>
-                </label>
+                <Button 
+                  className="brand-primary cursor-pointer"
+                  onClick={() => document.getElementById('file-upload').click()}
+                >
+                  Choose File
+                </Button>
               </div>
             </CardContent>
           </Card>
