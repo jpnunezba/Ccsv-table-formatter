@@ -110,9 +110,12 @@ function App() {
   const getRawValue = (value, fieldName, originalColumn) => {
     if (!value || value === '') return ''
     
-    // For calculated fields, return the numeric value
+    // For calculated fields like Median Weekly Rent, extract the numeric value from formatted string
     if (originalColumn === 'Median Weekly Rent') {
-      return parseFloat(value) || 0
+      // Remove $ sign and commas (e.g., "$871" -> 871)
+      const currencyStr = value.toString().replace(/[$,]/g, '')
+      const currencyNum = parseFloat(currencyStr)
+      return isNaN(currencyNum) ? 0 : currencyNum
     }
     
     // For percentage fields, extract the number and convert to decimal
