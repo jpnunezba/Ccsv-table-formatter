@@ -64,7 +64,6 @@ function App() {
   // Define currency fields
   const currencyFields = [
     'Suburb $ Median',
-    'Population',
     'Median Income',
     'Property Count',
     'Total Property Count',
