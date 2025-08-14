@@ -65,10 +65,17 @@ function App() {
   const currencyFields = [
     'Suburb $ Median',
     'Median Income',
+    'Median Weekly Rent'
+  ]
+
+  // Define number fields (formatted with comma separators)
+  const numberFields = [
+    'Population',
     'Property Count',
     'Total Property Count',
     'SA2 Estimated Resident Population',
-    'Median Weekly Rent'
+    'Sales Volume',
+    'Build. Approvals'
   ]
 
   // Calculate Median Weekly Rent from annual rental yield and property price
@@ -102,6 +109,10 @@ function App() {
       return `$${numValue.toLocaleString()}`
     }
     
+    if (numberFields.includes(fieldName)) {
+      return numValue.toLocaleString()
+    }
+    
     return value
   }
 
@@ -131,6 +142,14 @@ function App() {
       const currencyStr = value.toString().replace(/[$,]/g, '')
       const currencyNum = parseFloat(currencyStr)
       return isNaN(currencyNum) ? 0 : currencyNum
+    }
+    
+    // For number fields, extract the number
+    if (numberFields.includes(originalColumn)) {
+      // Remove commas (e.g., "15,000" -> 15000)
+      const numberStr = value.toString().replace(/,/g, '')
+      const numberNum = parseFloat(numberStr)
+      return isNaN(numberNum) ? 0 : numberNum
     }
     
     // For other fields, try to parse as number, otherwise return as string
@@ -391,6 +410,10 @@ function App() {
         else if (currencyFields.includes(originalColumn)) {
           ws[cellAddress].z = '$#,##0'
         }
+        // Format number fields
+        else if (numberFields.includes(originalColumn)) {
+          ws[cellAddress].z = '#,##0'
+        }
       }
     }
     
@@ -540,6 +563,9 @@ function App() {
                                     )}
                                     {currencyFields.includes(column) && (
                                       <span className="text-xs text-blue-600 ml-1">($ format)</span>
+                                    )}
+                                    {numberFields.includes(column) && (
+                                      <span className="text-xs text-purple-600 ml-1">(number format)</span>
                                     )}
                                   </label>
                                   <span className="text-xs text-gray-500">#{index + 1}</span>
