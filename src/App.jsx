@@ -272,16 +272,23 @@ function App() {
     Papa.parse(file, {
       header: true,
       complete: async (results) => {
+        // Filter out empty rows (rows where all values are empty or undefined)
+        const filteredData = results.data.filter(row => {
+          return Object.values(row).some(value => 
+            value !== null && value !== undefined && value !== ''
+          )
+        })
+        
         // Add calculated Median Weekly Rent to each row
-        let dataWithCalculatedFields = results.data.map(row => ({
+        let dataWithCalculatedFields = filteredData.map(row => ({
           ...row,
           'Median Weekly Rent': calculateMedianWeeklyRent(row)
         }))
         
         // Check if we have Suburb and State columns for LGA lookup
-        const hasSuburb = Object.keys(results.data[0] || {}).some(key => 
+        const hasSuburb = Object.keys(filteredData[0] || {}).some(key => 
           key.toLowerCase().includes('suburb'))
-        const hasState = Object.keys(results.data[0] || {}).some(key => 
+        const hasState = Object.keys(filteredData[0] || {}).some(key => 
           key.toLowerCase().includes('state'))
         
         // Perform LGA lookup if we have the required columns
@@ -307,7 +314,7 @@ function App() {
         setCsvData(dataWithCalculatedFields)
         
         // Get headers and add calculated fields
-        const csvHeaders = Object.keys(results.data[0] || {})
+        const csvHeaders = Object.keys(filteredData[0] || {})
         const allHeaders = [...csvHeaders, 'Median Weekly Rent', 'LGA']
         const sortedHeaders = sortHeaders(allHeaders)
         
