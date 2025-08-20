@@ -16,11 +16,14 @@ function App() {
   const [columnRenames, setColumnRenames] = useState({})
   const [tableData, setTableData] = useState([])
   const [fileName, setFileName] = useState('')
+  const [lgaCache, setLgaCache] = useState(new Map())
+  const [isLoadingLGA, setIsLoadingLGA] = useState(false)
 
   // Define column priority order
   const priorityColumns = [
     'Suburb',
-    'State', 
+    'State',
+    'LGA',
     'Owner Occupier',
     'Vacancy Rate',
     'Growth (12MTHS)',
@@ -77,6 +80,89 @@ function App() {
     'Sales Volume',
     'Build. Approvals'
   ]
+
+  // LGA Lookup Service
+  const lookupLGA = async (suburb, state) => {
+    if (!suburb || !state) return 'N/A'
+    
+    const cacheKey = `${suburb.toLowerCase()}-${state.toLowerCase()}`
+    
+    // Check cache first
+    if (lgaCache.has(cacheKey)) {
+      return lgaCache.get(cacheKey)
+    }
+    
+    try {
+      // Use OpenStreetMap Nominatim API for Australian LGA lookup
+      const query = `${suburb}, ${state}, Australia`
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=au&addressdetails=1&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'CSV-Table-Formatter/1.0'
+          }
+        }
+      )
+      
+      if (!response.ok) throw new Error('API request failed')
+      
+      const data = await response.json()
+      
+      if (data && data.length > 0 && data[0].address) {
+        // Extract LGA from various possible fields
+        const address = data[0].address
+        const lga = address.city_district || 
+                   address.county || 
+                   address.municipality || 
+                   address.administrative_area_level_2 ||
+                   address.city ||
+                   'N/A'
+        
+        // Cache the result
+        setLgaCache(prev => new Map(prev.set(cacheKey, lga)))
+        return lga
+      }
+    } catch (error) {
+      console.warn(`Failed to lookup LGA for ${suburb}, ${state}:`, error)
+    }
+    
+    // Cache failed lookups to avoid repeated attempts
+    setLgaCache(prev => new Map(prev.set(cacheKey, 'N/A')))
+    return 'N/A'
+  }
+
+  // Batch LGA lookup with rate limiting
+  const batchLookupLGA = async (rows) => {
+    const updatedRows = []
+    setIsLoadingLGA(true)
+    
+    try {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        const suburb = row['Suburb'] || row['suburb'] || ''
+        const state = row['State'] || row['state'] || ''
+        
+        // Add delay to respect API rate limits (1 request per second)
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+        
+        const lga = await lookupLGA(suburb, state)
+        updatedRows.push({
+          ...row,
+          'LGA': lga
+        })
+      }
+    } catch (error) {
+      console.error('Batch LGA lookup failed:', error)
+      // Return original rows with N/A LGA if batch fails
+      return rows.map(row => ({ ...row, 'LGA': 'N/A' }))
+    } finally {
+      setIsLoadingLGA(false)
+    }
+    
+    return updatedRows
+  }
 
   // Calculate Median Weekly Rent from annual rental yield and property price
   const calculateMedianWeeklyRent = (row) => {
@@ -169,7 +255,7 @@ function App() {
     return [...sortedPriority, ...others.sort()]
   }
 
-  const handleFileUpload = useCallback((file) => {
+  const handleFileUpload = useCallback(async (file) => {
     if (!file) {
       // Reset state when no file
       setCsvData(null)
@@ -185,18 +271,44 @@ function App() {
     
     Papa.parse(file, {
       header: true,
-      complete: (results) => {
+      complete: async (results) => {
         // Add calculated Median Weekly Rent to each row
-        const dataWithCalculatedFields = results.data.map(row => ({
+        let dataWithCalculatedFields = results.data.map(row => ({
           ...row,
           'Median Weekly Rent': calculateMedianWeeklyRent(row)
         }))
         
+        // Check if we have Suburb and State columns for LGA lookup
+        const hasSuburb = Object.keys(results.data[0] || {}).some(key => 
+          key.toLowerCase().includes('suburb'))
+        const hasState = Object.keys(results.data[0] || {}).some(key => 
+          key.toLowerCase().includes('state'))
+        
+        // Perform LGA lookup if we have the required columns
+        if (hasSuburb && hasState && dataWithCalculatedFields.length > 0) {
+          try {
+            dataWithCalculatedFields = await batchLookupLGA(dataWithCalculatedFields)
+          } catch (error) {
+            console.error('LGA lookup failed:', error)
+            // Add N/A LGA column if lookup fails
+            dataWithCalculatedFields = dataWithCalculatedFields.map(row => ({
+              ...row,
+              'LGA': 'N/A'
+            }))
+          }
+        } else {
+          // Add N/A LGA column if no suburb/state data
+          dataWithCalculatedFields = dataWithCalculatedFields.map(row => ({
+            ...row,
+            'LGA': 'N/A'
+          }))
+        }
+        
         setCsvData(dataWithCalculatedFields)
         
-        // Get headers and add calculated field
+        // Get headers and add calculated fields
         const csvHeaders = Object.keys(results.data[0] || {})
-        const allHeaders = [...csvHeaders, 'Median Weekly Rent']
+        const allHeaders = [...csvHeaders, 'Median Weekly Rent', 'LGA']
         const sortedHeaders = sortHeaders(allHeaders)
         
         setHeaders(sortedHeaders)
@@ -218,7 +330,7 @@ function App() {
         console.error('Error parsing CSV:', error)
       }
     })
-  }, [])
+  }, [lgaCache])
 
   const generateTableData = (data, columns, renames) => {
     const filteredData = data.map(row => {
@@ -443,6 +555,11 @@ function App() {
               </CardTitle>
               <CardDescription>
                 Upload a CSV file to get started. Priority columns will be selected by default, and you can customize the selection and order.
+                {isLoadingLGA && (
+                  <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
+                    <p className="text-sm text-blue-700">🔍 Looking up LGA information for suburbs... This may take a moment.</p>
+                  </div>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -503,6 +620,9 @@ function App() {
                           {header}
                           {header === 'Median Weekly Rent' && (
                             <span className="text-xs text-blue-600 ml-1">(calculated)</span>
+                          )}
+                          {header === 'LGA' && (
+                            <span className="text-xs text-green-600 ml-1">(auto-fetched)</span>
                           )}
                         </label>
                         <Badge variant={selectedColumns.includes(header) ? "default" : "secondary"}>
@@ -567,6 +687,9 @@ function App() {
                                     {numberFields.includes(column) && (
                                       <span className="text-xs text-purple-600 ml-1">(number format)</span>
                                     )}
+                                    {column === 'LGA' && (
+                                      <span className="text-xs text-green-600 ml-1">(auto-fetched)</span>
+                                    )}
                                   </label>
                                   <span className="text-xs text-gray-500">#{index + 1}</span>
                                 </div>
@@ -599,7 +722,7 @@ function App() {
                 Table Preview
               </CardTitle>
               <CardDescription>
-                Preview of your formatted table ({tableData.length} rows) - Percentages and currency automatically formatted
+                Preview of your formatted table ({tableData.length} rows) - Percentages, currency, and LGA information automatically formatted
               </CardDescription>
               <div className="flex gap-2">
                 <Button onClick={exportTableHTML} className="brand-accent">
