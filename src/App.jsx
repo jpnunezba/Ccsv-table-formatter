@@ -81,11 +81,14 @@ function App() {
     'Build. Approvals'
   ]
 
-  // LGA Lookup Service
-  const lookupLGA = async (suburb, state) => {
-    if (!suburb || !state) return 'N/A'
+  // LGA Lookup Service - Enhanced to work with Suburb + State OR Suburb + Postcode
+  const lookupLGA = async (suburb, state, postcode) => {
+    if (!suburb || (!state && !postcode)) return 'N/A'
     
-    const cacheKey = `${suburb.toLowerCase()}-${state.toLowerCase()}`
+    // Create cache key based on available data
+    const cacheKey = state 
+      ? `${suburb.toLowerCase()}-${state.toLowerCase()}`
+      : `${suburb.toLowerCase()}-${postcode}`
     
     // Check cache first
     if (lgaCache.has(cacheKey)) {
@@ -94,7 +97,11 @@ function App() {
     
     try {
       // Use OpenStreetMap Nominatim API for Australian LGA lookup
-      const query = `${suburb}, ${state}, Australia`
+      // Prefer postcode-based lookup for accuracy, fallback to state
+      const query = postcode 
+        ? `${suburb}, ${postcode}, Australia`
+        : `${suburb}, ${state}, Australia`
+        
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=au&addressdetails=1&limit=1`,
         {
@@ -123,7 +130,7 @@ function App() {
         return lga
       }
     } catch (error) {
-      console.warn(`Failed to lookup LGA for ${suburb}, ${state}:`, error)
+      console.warn(`Failed to lookup LGA for ${suburb}:`, error)
     }
     
     // Cache failed lookups to avoid repeated attempts
@@ -131,7 +138,7 @@ function App() {
     return 'N/A'
   }
 
-  // Batch LGA lookup with rate limiting
+  // Batch LGA lookup with rate limiting - Enhanced for Suburb + State OR Suburb + Postcode
   const batchLookupLGA = async (rows) => {
     const updatedRows = []
     setIsLoadingLGA(true)
@@ -141,13 +148,14 @@ function App() {
         const row = rows[i]
         const suburb = row['Suburb'] || row['suburb'] || ''
         const state = row['State'] || row['state'] || ''
+        const postcode = row['Postcode'] || row['postcode'] || ''
         
         // Add delay to respect API rate limits (1 request per second)
         if (i > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000))
         }
         
-        const lga = await lookupLGA(suburb, state)
+        const lga = await lookupLGA(suburb, state, postcode)
         updatedRows.push({
           ...row,
           'LGA': lga
@@ -285,14 +293,16 @@ function App() {
           'Median Weekly Rent': calculateMedianWeeklyRent(row)
         }))
         
-        // Check if we have Suburb and State columns for LGA lookup
+        // Check if we have Suburb and (State OR Postcode) columns for LGA lookup
         const hasSuburb = Object.keys(filteredData[0] || {}).some(key => 
           key.toLowerCase().includes('suburb'))
         const hasState = Object.keys(filteredData[0] || {}).some(key => 
           key.toLowerCase().includes('state'))
+        const hasPostcode = Object.keys(filteredData[0] || {}).some(key => 
+          key.toLowerCase().includes('postcode'))
         
-        // Perform LGA lookup if we have the required columns
-        if (hasSuburb && hasState && dataWithCalculatedFields.length > 0) {
+        // Perform LGA lookup if we have suburb and either state or postcode
+        if (hasSuburb && (hasState || hasPostcode) && dataWithCalculatedFields.length > 0) {
           try {
             dataWithCalculatedFields = await batchLookupLGA(dataWithCalculatedFields)
           } catch (error) {
